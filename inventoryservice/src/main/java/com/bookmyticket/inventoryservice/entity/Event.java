@@ -3,6 +3,8 @@ package com.bookmyticket.inventoryservice.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
+
 @Entity
 @Getter
 @Setter
@@ -25,6 +27,9 @@ public class Event {
     @ManyToOne
     @JoinColumn(name="venue_id")
     private Venue venue;
+
+    @Column(name =" ticket_price")
+    private BigDecimal ticketPrice;
 
 
 }
