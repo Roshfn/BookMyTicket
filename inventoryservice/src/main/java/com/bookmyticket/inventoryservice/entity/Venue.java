@@ -26,7 +26,7 @@ public class Venue {
     @Column(name="address")
     private String address;
 
-    @Column(name="totalCapacity")
+    @Column(name="total_capacity")
     private Long totalCapacity;
 
 }
