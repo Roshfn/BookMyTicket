@@ -2,38 +2,68 @@ package com.bookmyticket.bookingservice.service;
 
 import com.bookmyticket.bookingservice.client.InventoryServiceClient;
 import com.bookmyticket.bookingservice.entity.Customer;
+import com.bookmyticket.bookingservice.event.BookingEvent;
 import com.bookmyticket.bookingservice.repo.CustomerRepository;
 import com.bookmyticket.bookingservice.request.BookingRequest;
 import com.bookmyticket.bookingservice.response.BookingResponse;
 import com.bookmyticket.bookingservice.response.InventoryResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+
 @Service
+@Slf4j
 public class BookingService {
+
     private final CustomerRepository customerRepository;
     private final InventoryServiceClient inventoryServiceClient;
+    private final KafkaTemplate<String, BookingEvent> kafkaTemplate;
 
     @Autowired
-    private  BookingService (final CustomerRepository customerRepository,
-                             final InventoryServiceClient inventroyServiceClient){
-        this.customerRepository= customerRepository;
-        this.inventoryServiceClient= inventroyServiceClient;
+    public BookingService(final CustomerRepository customerRepository,
+                          final InventoryServiceClient inventoryServiceClient,
+                          final KafkaTemplate<String, BookingEvent> kafkaTemplate) {
+        this.customerRepository = customerRepository;
+        this.inventoryServiceClient = inventoryServiceClient;
+        this.kafkaTemplate = kafkaTemplate;
     }
-    public BookingResponse createBooking(BookingRequest request) {
-        //if customer exists
-        final Customer customer = customerRepository.findById(request.getUserId()).orElse(null);
 
-        //if customer does not exist
-        if (customer==null){
-            throw new RuntimeException(" customer not found");
+    public BookingResponse createBooking(final BookingRequest request) {
+        // check if user exists
+        final Customer customer = customerRepository.findById(request.getUserId()).orElse(null);
+        if (customer == null) {
+            throw new RuntimeException("User not found");
         }
-        //check if there is enough inventory
-        final InventoryResponse inventoryResponse= inventoryServiceClient.getInventory(request.getEventId());
-        System.out.println("Inventory Service Response "+ inventoryResponse);
-        //get event information to also venue information
+        // check if there is enough inventory
+        final InventoryResponse inventoryResponse = inventoryServiceClient.getInventory(request.getEventId());
+        log.info("Inventory Response: {}", inventoryResponse);
+        if (inventoryResponse.getCapacity() < request.getTicketCount()) {
+            throw new RuntimeException("Not enough inventory");
+        }
         // create booking
-        //send booking to order service
-        return BookingResponse.builder().build();
+        final BookingEvent bookingEvent = createBookingEvent(request, customer, inventoryResponse);
+        // send booking to Order Service on a Kafka Topic
+        kafkaTemplate.send("booking", bookingEvent);
+        log.info("Booking sent to Kafka: {}", bookingEvent);
+        return BookingResponse.builder()
+                .userId(bookingEvent.getUserId())
+                .eventId(bookingEvent.getEventId())
+                .ticketCount(bookingEvent.getTicketCount())
+                .totalPrice(bookingEvent.getTotalPrice())
+                .build();
+    }
+
+    private BookingEvent createBookingEvent(final BookingRequest request,
+                                            final Customer customer,
+                                            final InventoryResponse inventoryResponse) {
+        return BookingEvent.builder()
+                .userId(customer.getId())
+                .eventId(request.getEventId())
+                .ticketCount(request.getTicketCount())
+                .totalPrice(inventoryResponse.getTicketPrice().multiply(BigDecimal.valueOf(request.getTicketCount())))
+                .build();
     }
 }
